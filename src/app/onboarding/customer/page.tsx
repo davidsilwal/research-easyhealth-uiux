@@ -409,9 +409,14 @@ function CustomerOnboardingContent() {
 
 function LoadingFallback() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 flex items-center justify-center">
+    <div 
+      className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 flex items-center justify-center"
+      role="status"
+      aria-live="polite"
+      aria-label="Loading content"
+    >
       <div className="animate-pulse text-center">
-        <div className="h-12 w-12 rounded-full bg-emerald-200 mx-auto mb-4"></div>
+        <div className="h-12 w-12 rounded-full bg-emerald-200 mx-auto mb-4" aria-hidden="true"></div>
         <p className="text-slate-500">Loading...</p>
       </div>
     </div>
