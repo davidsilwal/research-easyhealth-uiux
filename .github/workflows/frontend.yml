@@ -1,0 +1,100 @@
+name: Build, Push and Deploy Next.js App
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'Dockerfile'
+      - '.github/workflow/frontend.yml'
+      - 'next.config.ts'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/easycare-365-${{ github.ref_name }}
+
+jobs:
+  build-and-push:
+    name: Next.js Build and Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set lowercase repository owner
+        id: repo_owner
+        run: |
+          echo "owner_lc=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.repo_owner.outputs.owner_lc }}/easycare-365-${{ github.ref_name }}:latest
+            ${{ env.REGISTRY }}/${{ steps.repo_owner.outputs.owner_lc }}/easycare-365-${{ github.ref_name }}:${{ github.run_number }}
+
+      - name: Clean up old package versions
+        continue-on-error: true
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: 'easycare-365-${{ github.ref_name }}'
+          package-type: 'container'
+          min-versions-to-keep: 2
+          delete-only-untagged-versions: 'false'
+
+  deploy:
+    name: Deploy Next.js App to Remote Server
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 129.212.208.162
+          username: root
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            # Set proper image name
+            IMAGE_URI="ghcr.io/${{ github.repository_owner }}/easycare-365-${{ github.ref_name }}:latest"
+            IMAGE_URI_LC=$(echo "$IMAGE_URI" | tr '[:upper:]' '[:lower:]')
+            
+            echo "Logging in to GitHub Container Registry..."
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            echo "Pulling latest image: $IMAGE_URI_LC"
+            docker pull $IMAGE_URI_LC
+            
+            echo "Stopping and removing existing container..."
+            docker stop easycare-frontend || true
+            docker rm easycare-frontend || true
+            
+            echo "Starting new container..."
+            docker run -d \
+              --name easycare-frontend \
+              --restart unless-stopped \
+              -p 7000:3000 \
+              $IMAGE_URI_LC
+            
+            echo "Next.js app deployment completed successfully!"
+            docker ps | grep easycare-frontend
+            
+            echo "Cleaning up old images and containers..."
+            docker image prune -af
+            docker container prune -f
